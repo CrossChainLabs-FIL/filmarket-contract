@@ -1,0 +1,24 @@
+{
+  "name": "filmarket-contract",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "npm run build:contract ",
+    "build:contract": "node ./contract/build",
+    "dev:deploy:contract": "near dev-deploy",
+    "deploy:contract": "near deploy",
+    "deploy": "npm run build && npm run deploy:contract",
+    "prestart": "npm run build:contract && npm run dev:deploy:contract",
+    "test": "(cd contract && cargo test -- --nocapture && cd ..) && npm run build:contract"
+  },
+  "devDependencies": {
+    "near-cli": "^1.0.1"
+  },
+  "dependencies": {
+    "big.js": "^6.1.1",
+    "near-api-js": "^0.43.1",
+    "npm": "^7.21.1",
+    "regenerator-runtime": "^0.13.9",
+    "shelljs": "^0.8.5"
+  }
+}
