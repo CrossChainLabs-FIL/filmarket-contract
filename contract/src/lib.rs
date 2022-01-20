@@ -42,6 +42,7 @@ pub struct FilMarket {
     storage_providers: UnorderedMap<String, StorageProvider>,
     active_per_region: ActivePerRegion,
     price_per_region: PricePerRegion,
+    global_price: String,
 }
 
 #[near_bindgen]
@@ -63,6 +64,7 @@ impl FilMarket {
                 north_america:'0'.to_string(), 
                 other:'0'.to_string()
             },
+            global_price: '0'.to_string()
         }
     }
 
@@ -140,6 +142,16 @@ impl FilMarket {
         };
 
         return price_per_region;
+    }
+
+    // set the global average storage price
+    pub fn set_global_price(&mut self, global_price: String) {
+        self.global_price = global_price;
+    }
+
+    // get the global average storage price
+     pub fn get_global_price(&self) -> String {
+        return self.global_price.clone();
     }
 }
 
@@ -237,5 +249,17 @@ mod tests {
         assert_eq!("0.0004 USD".to_string(), result.asia);
         assert_eq!("0.0002 USD".to_string(), result.north_america);
         assert_eq!("0.00005 USD".to_string(), result.other);
+    }
+
+    #[test]
+    fn set_then_global_price() {
+        let context = get_context();
+        testing_env!(context);
+        let mut contract = FilMarket::new();
+
+        contract.set_global_price("0.00003 USD".to_string());
+        let result = contract.get_global_price();
+
+        assert_eq!("0.00003 USD".to_string(), result);
     }
 }
