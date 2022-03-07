@@ -26,6 +26,7 @@ pub struct PricePerRegion {
     other: f64,         // FIL
     global: f64,        // FIL
     fil_price: f64,     // USD
+    power: u128,        // network power in TiB
     timestamp: u64,     // epoch time in seconds
 }
 
@@ -44,6 +45,8 @@ pub struct FilMarket {
     storage_providers: UnorderedMap<String, StorageProvider>,
     price_per_region: UnorderedMap<u64, PricePerRegion>,
     active_per_region: ActivePerRegion,
+    latest_timestamp: u64,
+    owner: String,
 }
 
 #[near_bindgen]
@@ -60,12 +63,19 @@ impl FilMarket {
                 north_america: 0, 
                 other: 0
             },
+            latest_timestamp: 0,
+            owner: env::predecessor_account_id().to_string(),
         }
     }
 
     // add or update storage providers
     pub fn update_storage_providers(&mut self, storage_providers: Vec<StorageProvider>) {
         let account_id = env::predecessor_account_id();
+
+        if account_id.to_string() != self.owner {
+            env::log_str(&format!("update_storage_providers(): account_id {} is not owner", account_id));
+            return;
+        }
 
         env::log_str(&format!("update_storage_providers(): account_id {} storage providers {}", account_id, storage_providers.len()));
 
@@ -94,6 +104,11 @@ impl FilMarket {
     pub fn delete_storage_providers(&mut self, storage_providers: Vec<String>) {
         let account_id = env::predecessor_account_id();
 
+        if account_id.to_string() != self.owner {
+            env::log_str(&format!("delete_storage_providers(): account_id {} is not owner", account_id));
+            return;
+        }
+
         for iter in storage_providers.iter() {
             self.storage_providers.remove(iter);
         }
@@ -109,6 +124,13 @@ impl FilMarket {
 
     // set the total of active storage providers per region
     pub fn set_active_per_region(&mut self, active_per_region: ActivePerRegion) {
+        let account_id = env::predecessor_account_id();
+
+        if account_id.to_string() != self.owner {
+            env::log_str(&format!("set_active_per_region(): account_id {} is not owner", account_id));
+            return;
+        }
+
         self.active_per_region = active_per_region;
     }
 
@@ -126,6 +148,13 @@ impl FilMarket {
 
     // set the average storage price per region
     pub fn set_price_per_region(&mut self, price_per_region: PricePerRegion) {
+        let account_id = env::predecessor_account_id();
+
+        if account_id.to_string() != self.owner {
+            env::log_str(&format!("set_price_per_region(): account_id {} is not owner", account_id));
+            return;
+        }
+
         let empty_ppr = PricePerRegion {
             europe: 0.0 as f64,
             asia: 0.0 as f64,
@@ -133,6 +162,7 @@ impl FilMarket {
             other: 0.0 as f64,
             global: 0.0 as f64,
             fil_price: 0.0 as f64,
+            power: 0 as u128,
             timestamp: 0 as u64,
         };
 
@@ -147,19 +177,43 @@ impl FilMarket {
         ppr.other = price_per_region.other;
         ppr.global = price_per_region.global;
         ppr.fil_price = price_per_region.fil_price;
+        ppr.power = price_per_region.power;
 
         self.price_per_region.insert(&ppr.timestamp, &ppr);
+        self.latest_timestamp = price_per_region.timestamp;
     }
 
     // get the average storage price per region
-    pub fn get_price_per_region(&self) -> Vec<PricePerRegion> {
+    pub fn get_price_per_region_list(&self) -> Vec<PricePerRegion> {
         let ppr = self.price_per_region.values_as_vector().to_vec();
+        return ppr;
+    }
+
+    // get the latest storage price per region
+    pub fn get_latest_price_per_region(&self) ->PricePerRegion {
+        let empty_ppr = PricePerRegion {
+            europe: 0.0 as f64,
+            asia: 0.0 as f64,
+            north_america: 0.0 as f64,
+            other: 0.0 as f64,
+            global: 0.0 as f64,
+            fil_price: 0.0 as f64,
+            power: 0 as u128,
+            timestamp: 0 as u64,
+        };
+
+        let ppr = self.price_per_region.get(&self.latest_timestamp).unwrap_or(empty_ppr);
         return ppr;
     }
 
     // delete the given timestamps
     pub fn delete_price_per_region(&mut self, timestamps: Vec<u64>) {
         let account_id = env::predecessor_account_id();
+
+        if account_id.to_string() != self.owner {
+            env::log_str(&format!("set_price_per_region(): account_id {} is not owner", account_id));
+            return;
+        }
     
         for iter in timestamps.iter() {
             self.price_per_region.remove(iter);
@@ -275,11 +329,12 @@ mod tests {
             other: 0.00005,
             global: 0.00034,
             fil_price: 64.245,
+            power: 1024,
             timestamp: 1,
         };
 
         contract.set_price_per_region(price_per_region);
-        let result = contract.get_price_per_region();
+        let result = contract.get_price_per_region_list();
 
         assert_eq!(0.00013, result[0].europe);
         assert_eq!(0.0004, result[0].asia);
@@ -287,6 +342,7 @@ mod tests {
         assert_eq!(0.00005, result[0].other);
         assert_eq!(0.00034, result[0].global);
         assert_eq!(64.245, result[0].fil_price);
+        assert_eq!(1024, result[0].power);
         assert_eq!(1, result[0].timestamp);
     }
 }
