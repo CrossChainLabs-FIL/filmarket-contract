@@ -5,7 +5,7 @@
   "scripts": {
     "build": "npm run build:contract ",
     "build:contract": "node ./contract/build",
-    "dev:deploy:contract": "near dev-deploy",
+    "dev:deploy:contract": "near dev-deploy -f",
     "deploy:contract": "near deploy",
     "deploy": "npm run build && npm run deploy:contract",
     "prestart": "npm run build:contract && npm run dev:deploy:contract",

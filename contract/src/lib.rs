@@ -20,29 +20,30 @@ pub struct ActivePerRegion {
 #[derive(Default, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct PricePerRegion {
-    europe: String,
-    asia: String,
-    north_america: String,
-    other: String,
+    europe: f64,        // FIL
+    asia: f64,          // FIL
+    north_america: f64, // FIL
+    other: f64,         // FIL
+    global: f64,        // FIL
+    fil_price: f64,     // USD
+    timestamp: u64,     // epoch time in seconds
 }
 
 #[derive(Default, Serialize, Deserialize, BorshDeserialize, BorshSerialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct StorageProvider {
     id: String,
-    region: String,
-    power: String,
-    price: String,
-    price_fil: String, 
+    region: u8,  // "North America":1, "Europe":2, "Asia":3, "Other":4 
+    power: f64,  // GiB
+    price: f64,  // FIL
 }
 
 #[near_bindgen]
 #[derive(BorshDeserialize, BorshSerialize, PanicOnDefault)]
 pub struct FilMarket {
     storage_providers: UnorderedMap<String, StorageProvider>,
+    price_per_region: UnorderedMap<u64, PricePerRegion>,
     active_per_region: ActivePerRegion,
-    price_per_region: PricePerRegion,
-    global_price: String,
 }
 
 #[near_bindgen]
@@ -52,19 +53,13 @@ impl FilMarket {
         assert!(!env::state_exists(), "The contract is already initialized");
         Self {
             storage_providers: UnorderedMap::new(b"a".to_vec()),
+            price_per_region: UnorderedMap::new(b"b".to_vec()),
             active_per_region: ActivePerRegion {
-                europe:0, 
-                asia:0, 
-                north_america:0, 
-                other:0
+                europe: 0, 
+                asia: 0, 
+                north_america: 0, 
+                other: 0
             },
-            price_per_region: PricePerRegion {
-                europe:'0'.to_string(), 
-                asia:'0'.to_string(), 
-                north_america:'0'.to_string(), 
-                other:'0'.to_string()
-            },
-            global_price: '0'.to_string()
         }
     }
 
@@ -77,10 +72,9 @@ impl FilMarket {
         for sp in storage_providers.iter() {
             let empty_sp = StorageProvider {
                 id: "".to_string(),
-                region: "".to_string(),
-                power: "".to_string(),
-                price: "".to_string(),
-                price_fil: "".to_string()
+                region: 0 as u8,
+                power: 0.0 as f64,
+                price: 0.0 as f64,
             };
 
             let mut storage_provider = self.storage_providers.get(&sp.id).unwrap_or(empty_sp);
@@ -91,15 +85,18 @@ impl FilMarket {
 
             storage_provider.power = sp.power.clone();
             storage_provider.price = sp.price.clone();
-            storage_provider.price_fil = sp.price_fil.clone();
 
             self.storage_providers.insert(&storage_provider.id, &storage_provider);
         }
     }
 
     // delete the given storage providers
-    pub fn delete_storage_providers(&mut self, storage_providers: Vec<StorageProvider>) {
+    pub fn delete_storage_providers(&mut self, storage_providers: Vec<String>) {
         let account_id = env::predecessor_account_id();
+
+        for iter in storage_providers.iter() {
+            self.storage_providers.remove(iter);
+        }
 
         env::log_str(&format!("delete_storage_providers(): account_id {} storage providers {}", account_id, storage_providers.len()));
     }
@@ -129,29 +126,46 @@ impl FilMarket {
 
     // set the average storage price per region
     pub fn set_price_per_region(&mut self, price_per_region: PricePerRegion) {
-        self.price_per_region = price_per_region;
+        let empty_ppr = PricePerRegion {
+            europe: 0.0 as f64,
+            asia: 0.0 as f64,
+            north_america: 0.0 as f64,
+            other: 0.0 as f64,
+            global: 0.0 as f64,
+            fil_price: 0.0 as f64,
+            timestamp: 0 as u64,
+        };
+
+        let mut ppr = self.price_per_region.get(&price_per_region.timestamp).unwrap_or(empty_ppr);
+        if ppr.timestamp == 0 {
+            ppr.timestamp = price_per_region.timestamp;
+        }
+
+        ppr.europe = price_per_region.europe;
+        ppr.asia = price_per_region.asia;
+        ppr.north_america = price_per_region.north_america;
+        ppr.other = price_per_region.other;
+        ppr.global = price_per_region.global;
+        ppr.fil_price = price_per_region.fil_price;
+
+        self.price_per_region.insert(&ppr.timestamp, &ppr);
     }
 
     // get the average storage price per region
-    pub fn get_price_per_region(&self) -> PricePerRegion {
-        let price_per_region = PricePerRegion {
-            europe: self.price_per_region.europe.clone(), 
-            asia: self.price_per_region.asia.clone(), 
-            north_america: self.price_per_region.north_america.clone(), 
-            other: self.price_per_region.other.clone()
-        };
-
-        return price_per_region;
+    pub fn get_price_per_region(&self) -> Vec<PricePerRegion> {
+        let ppr = self.price_per_region.values_as_vector().to_vec();
+        return ppr;
     }
 
-    // set the global average storage price
-    pub fn set_global_price(&mut self, global_price: String) {
-        self.global_price = global_price;
-    }
-
-    // get the global average storage price
-     pub fn get_global_price(&self) -> String {
-        return self.global_price.clone();
+    // delete the given timestamps
+    pub fn delete_price_per_region(&mut self, timestamps: Vec<u64>) {
+        let account_id = env::predecessor_account_id();
+    
+        for iter in timestamps.iter() {
+            self.price_per_region.remove(iter);
+        }
+    
+         env::log_str(&format!("delete_price_per_region(): account_id {} entries {}", account_id, timestamps.len()));
     }
 }
 
@@ -178,33 +192,52 @@ mod tests {
     }
 
     #[test]
-    fn set_then_get_storage_providers() {
+    fn set_then_get_remove_storage_providers() {
         let context = get_context();
+        enum Regions {
+            NorthAmerica = 1,
+            Europe = 2,
+            Asia = 3,
+            Other = 4,
+        }
+
         testing_env!(context);
         let mut contract = FilMarket::new();
         let sp_list = vec![
             StorageProvider {
                 id: "id1".to_string(),
-                region: "europe".to_string(),
-                power: "500000".to_string(),
-                price: "0.001 USD".to_string(),
-                price_fil: "20 nanoFIL".to_string()
+                region: Regions::Europe as u8,
+                power: 24.64,
+                price: 0.46
             },
             StorageProvider {
                 id: "id2".to_string(),
-                region: "asia".to_string(),
-                power: "600000".to_string(),
-                price: "0.003 USD".to_string(),
-                price_fil: "30 nanoFIL".to_string()
+                region: Regions::Asia as u8,
+                power: 5693.0,
+                price: 0.6778
+            },
+            StorageProvider {
+                id: "id3".to_string(),
+                region: Regions::NorthAmerica as u8,
+                power: 54.64,
+                price: 0.43
+            },
+            StorageProvider {
+                id: "id4".to_string(),
+                region: Regions::Other as u8,
+                power: 454.64,
+                price: 0.143
             },
         ];
 
         contract.update_storage_providers(sp_list);
+        contract.delete_storage_providers(vec!["id4".to_string()]);
         let result = contract.get_storage_providers();
 
-        assert_eq!(2, result.len());
+        assert_eq!(3, result.len());
         assert_eq!("id1".to_string(), result[0].id);
         assert_eq!("id2".to_string(), result[1].id);
+        assert_eq!("id3".to_string(), result[2].id);
     }
 
     #[test]
@@ -236,30 +269,24 @@ mod tests {
         let mut contract = FilMarket::new();
 
         let price_per_region = PricePerRegion {
-            europe: "0.00013 USD".to_string(),
-            asia: "0.0004 USD".to_string(),
-            north_america: "0.0002 USD".to_string(),
-            other: "0.00005 USD".to_string(),
+            europe: 0.00013,
+            asia: 0.0004,
+            north_america: 0.0002,
+            other: 0.00005,
+            global: 0.00034,
+            fil_price: 64.245,
+            timestamp: 1,
         };
 
         contract.set_price_per_region(price_per_region);
         let result = contract.get_price_per_region();
 
-        assert_eq!("0.00013 USD".to_string(), result.europe);
-        assert_eq!("0.0004 USD".to_string(), result.asia);
-        assert_eq!("0.0002 USD".to_string(), result.north_america);
-        assert_eq!("0.00005 USD".to_string(), result.other);
-    }
-
-    #[test]
-    fn set_then_global_price() {
-        let context = get_context();
-        testing_env!(context);
-        let mut contract = FilMarket::new();
-
-        contract.set_global_price("0.00003 USD".to_string());
-        let result = contract.get_global_price();
-
-        assert_eq!("0.00003 USD".to_string(), result);
+        assert_eq!(0.00013, result[0].europe);
+        assert_eq!(0.0004, result[0].asia);
+        assert_eq!(0.0002, result[0].north_america);
+        assert_eq!(0.00005, result[0].other);
+        assert_eq!(0.00034, result[0].global);
+        assert_eq!(64.245, result[0].fil_price);
+        assert_eq!(1, result[0].timestamp);
     }
 }
